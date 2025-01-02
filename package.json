@@ -24,7 +24,7 @@
     "elysia": "^1.2.9",
     "prisma-generator-vault": "^0.0.2",
     "reflect-metadata": "^0.2.2",
-    "rpc-nats-alvamind": "^1.0.2",
+    "rpc-nats-alvamind": "1.0.6",
     "tsyringe-neo": "^5.1.0",
     "zod": "^3.24.1",
     "zod-prisma-types": "3.2.1"

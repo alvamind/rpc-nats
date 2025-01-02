@@ -1,10 +1,8 @@
 prisma
 src
 src/common
-src/common/generic
 src/config
 src/database
-src/database/{migrations}
 src/module
 src/module/category
 src/module/product
@@ -68,7 +66,7 @@ services:
     "elysia": "^1.2.9",
     "prisma-generator-vault": "^0.0.2",
     "reflect-metadata": "^0.2.2",
-    "rpc-nats-alvamind": "^1.0.1",
+    "rpc-nats-alvamind": "1.0.5",
     "tsyringe-neo": "^5.1.0",
     "zod": "^3.24.1",
     "zod-prisma-types": "3.2.1"
