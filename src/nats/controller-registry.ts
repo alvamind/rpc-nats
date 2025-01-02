@@ -20,6 +20,7 @@ export class ControllerRegistry {
     for (const token of tokens) {
       try {
         let instance = this.container.resolve(token);
+        // console.log(`[Controller Registry] Controller resolved : ${String(token)}`);
         if (instance?.constructor?.name?.includes('Controller')) {
           // console.log(`Registering controller: ${instance.constructor.name}`);
           await this.nats.registerAll(instance);

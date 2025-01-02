@@ -1,23 +1,24 @@
-// src/nats/nats-scanner.ts
 import 'reflect-metadata';
 interface MethodMetadata {
   key: string;
   subject: string;
 }
+
 export function getAllImplementedInterfaces(target: any): any[] {
-  const interfaces = Reflect.getMetadata('design:interfaces', target) || [];
-  return interfaces;
+  return Reflect.getMetadata('design:interfaces', target) || [];
 }
 
-export function getAllInterfaceMethods(interfaceClass: any): MethodMetadata[] {
+export function getAllInterfaceMethods(target: any): MethodMetadata[] {
   const methods: MethodMetadata[] = [];
-  if (!interfaceClass || !interfaceClass.prototype) return methods;
-  for (const key of Object.getOwnPropertyNames(interfaceClass.prototype)) {
-    if (key === 'constructor') continue;
-    methods.push({ key, subject: `${interfaceClass.name}.${key}` });
+  if (!target || !target.prototype) return methods;
+
+  for (const key of Object.getOwnPropertyNames(target.prototype)) {
+    if (key === 'constructor' || typeof target.prototype[key] !== 'function') continue;
+    methods.push({ key, subject: `${target.name}.${key}` });
   }
   return methods;
 }
+
 export function createProxyController<T>(controller: T, nats: any): T {
   const handler = {
     get(target: any, prop: string, receiver: any) {

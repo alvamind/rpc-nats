@@ -86,21 +86,23 @@ services:
 
 // src/app.module.ts
 import { container } from './config/dependency.config';
-import { ProductController } from './module/product/product.controller';
-import { CategoryController } from './module/category/category.controller';
 import { NATSAbstraction } from './nats/nats-abstraction';
 import { config } from './config/general.config';
 import { ControllerRegistry } from './nats/controller-registry';
 export async function initializeApp(): Promise<void> {
   const nats = new NATSAbstraction(config.nats.url);
-  await nats.connect();
-  container.register(NATSAbstraction, { useValue: nats }); // Register NATSAbstraction here
-  const productController = container.resolve(ProductController);
-  const categoryController = container.resolve(CategoryController);
-  const registry = new ControllerRegistry(nats, container);
-  await registry.registerAll();
-  await new Promise((resolve) => setTimeout(resolve, 1000));
-  return;
+  try {
+    await nats.connect();
+    console.log('NATS connected successfully');
+    container.register(NATSAbstraction, { useValue: nats });
+    const registry = new ControllerRegistry(nats, container);
+    await registry.registerAll();
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    console.log('App initialization complete');
+  } catch (error) {
+    console.error('Failed to initialize app:', error);
+    throw error;
+  }
 }
 
 // src/config/dependency.config.ts
@@ -391,15 +393,19 @@ export class ProductController {
     try {
       console.log('getProductWithCategory called', id);
       const product = await this.productService.findUnique({ where: { id } });
-      if (!product) return null;
-      const category = await this.nats
-        .call('CategoryController.getCategoryById', {
+      if (!product) {
+        console.log('Product not found');
+        return null;
+      }
+      let category = null;
+      try {
+        category = await this.nats.call('CategoryController.getCategoryById', {
           id: product.categoryId,
-        })
-        .catch((err) => {
-          console.error('Error calling getCategoryById:', err);
-          return null;
         });
+        console.log('Category response:', category);
+      } catch (err) {
+        console.error('Failed to fetch category:', err);
+      }
       return {
         ...product,
         category,
@@ -482,6 +488,11 @@ export class NATSAbstraction {
   private handlers = new Map<string, RPCHandler<any, any>>();
   private isConnected = false;
   constructor(private server: string) {}
+  private async ensureConnection() {
+    if (!this.isConnected) {
+      await this.connect();
+    }
+  }
   async connect() {
     if (!this.isConnected) {
       this.nc = await connect({ servers: this.server });
@@ -494,36 +505,30 @@ export class NATSAbstraction {
     }
   }
   async call<T, R>(subject: string, data: T): Promise<R> {
-    if (!this.nc || !this.isConnected) {
-      throw new Error('NATS not connected');
-    }
+    await this.ensureConnection();
     try {
       const encodedData = new TextEncoder().encode(JSON.stringify(data));
-      const response = await this.nc.request(subject, encodedData, { timeout: 5000 });
+      const response = await this.nc!.request(subject, encodedData, {
+        timeout: 10000, // Increase timeout to 10 seconds
+      });
       const decodedData = new TextDecoder().decode(response.data);
-      const result = JSON.parse(decodedData);
-      return result as R;
+      return JSON.parse(decodedData) as R;
     } catch (error) {
       console.error(`[NATS] Error calling ${subject}:`, error);
       throw error;
     }
   }
   async register<T, R>(subject: string, handler: RPCHandler<T, R>) {
-    if (!this.nc || !this.isConnected) {
-      throw new Error('NATS not connected');
-    }
+    await this.ensureConnection();
     if (this.handlers.has(subject)) {
       console.warn(`[NATS] Handler already registered for subject: ${subject}`);
       return;
     }
     console.log(`[NATS] Registering handler for ${subject}`);
     this.handlers.set(subject, handler);
-    const subscription = this.nc.subscribe(subject, {
-      callback: async (err, msg) => {
-        if (err) {
-          console.error(`[NATS] Error on ${subject} sub:`, err);
-          return;
-        }
+    const subscription = this.nc!.subscribe(subject);
+    (async () => {
+      for await (const msg of subscription) {
         try {
           const decodedData = new TextDecoder().decode(msg.data);
           const data = JSON.parse(decodedData);
@@ -532,12 +537,11 @@ export class NATSAbstraction {
           msg.respond(response);
         } catch (error) {
           console.error(`[NATS] Error processing message for ${subject}:`, error);
-          const errorResponse = new TextEncoder().encode(JSON.stringify({ error: error.message }));
+          const errorResponse = new TextEncoder().encode(JSON.stringify({ error: (error as Error).message }));
           msg.respond(errorResponse);
         }
-      },
-    });
-    await subscription.closed;
+      }
+    })().catch((err) => console.error(`[NATS] Subscription error:`, err));
   }
   async registerAll(controller: any) {
     const interfaces = getAllImplementedInterfaces(controller);
