@@ -11,7 +11,7 @@ export class ProductController {
     @inject(ProductService) private readonly productService: ProductService,
     @inject(NatsRpc) private readonly natsRpc: NatsRpc,
   ) {
-    this.categoryController = this.natsRpc.getControllerProxy<CategoryController>('CategoryController');
+    this.categoryController = this.natsRpc.getControllerProxy<CategoryController>(CategoryController.name);
   }
   async getProductById(id: number) {
     console.log('getProductById called', id);
