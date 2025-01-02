@@ -28,7 +28,6 @@ const createErrorResponse = ({ code, error, request }: any): Response => {
   });
 };
 const startTime = performance.now();
-
 const app = new Elysia()
   .onStart(async () => {
     await initializeApp();
@@ -63,7 +62,6 @@ const app = new Elysia()
   })
   .onError(createErrorResponse)
   .listen(3000);
-
 const endTime = performance.now();
 const startupTime = endTime - startTime;
 logger.warn(`🦊 Elysia is running at ${app.server?.hostname}:${app.server?.port} in ${startupTime.toFixed(2)}ms`);

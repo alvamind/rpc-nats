@@ -8,7 +8,6 @@ src/database/{migrations}
 src/module
 src/module/category
 src/module/product
-src/nats
 src/persistence
 src/persistence/prisma
 src/types
@@ -67,10 +66,9 @@ services:
     "alvamind-tools": "^1.0.1",
     "dotenv": "^16.4.7",
     "elysia": "^1.2.9",
-    "ioredis": "^5.3.2",
-    "nats": "^2.19.0",
     "prisma-generator-vault": "^0.0.2",
     "reflect-metadata": "^0.2.2",
+    "rpc-nats-alvamind": "^1.0.1",
     "tsyringe-neo": "^5.1.0",
     "zod": "^3.24.1",
     "zod-prisma-types": "3.2.1"
@@ -86,39 +84,40 @@ services:
 
 // src/app.module.ts
 import { container } from './config/dependency.config';
-import { NATSAbstraction } from './nats/nats-abstraction';
 import { config } from './config/general.config';
-import { ControllerRegistry } from './nats/controller-registry';
+import { NatsRpc } from 'rpc-nats-alvamind';
 export async function initializeApp(): Promise<void> {
-  const nats = new NATSAbstraction(config.nats.url);
   try {
-    await nats.connect();
-    console.log('NATS connected successfully');
-    container.register(NATSAbstraction, { useValue: nats });
-    const registry = new ControllerRegistry(nats, container);
-    await registry.registerAll();
+    const natsRpc = new NatsRpc({
+      dependencyResolver: container,
+      natsUrl: config.nats.url,
+      subjectPattern: (className, methodName) => `${className}-${methodName}`,
+    });
+    container.register(NatsRpc, { useValue: natsRpc });
+    await natsRpc.connect();
+    await natsRpc.registerController('CategoryController');
+    await natsRpc.registerController('ProductController');
     await new Promise((resolve) => setTimeout(resolve, 2000));
     console.log('App initialization complete');
   } catch (error) {
     console.error('Failed to initialize app:', error);
-    throw error;
   }
 }
 
 // src/config/dependency.config.ts
-import { container, Lifecycle } from 'tsyringe-neo';
+import { container } from 'tsyringe-neo';
 import { PrismaClient } from '@prisma/client';
 import { prismaClient } from '../persistence/prisma/prisma-client';
 import { ProductService } from '../module/product/product.service';
 import { ProductController } from '../module/product/product.controller';
 import { CategoryService } from '../module/category/category.service';
 import { CategoryController } from '../module/category/category.controller';
-import { NATSAbstraction } from '../nats/nats-abstraction'; // Import NATSAbstraction
+import { TsyringeResolver } from 'rpc-nats-alvamind';
 container.register(PrismaClient, { useValue: prismaClient });
 container.registerSingleton(ProductService);
 container.registerSingleton(CategoryService);
-container.registerSingleton(ProductController);
-container.registerSingleton(CategoryController);
+container.register('ProductController', { useClass: ProductController });
+container.register('CategoryController', { useClass: CategoryController });
 const CONTEXT_WITH_CONTAINER = Symbol.for('ContextWithContainer');
 container.register(CONTEXT_WITH_CONTAINER, {
   useFactory: (context) => {
@@ -308,16 +307,14 @@ export { app };
 import { Prisma } from '@prisma/client';
 import { CategoryService } from './category.service';
 import { inject, injectable } from 'tsyringe-neo';
-import { NATSAbstraction } from '../../nats/nats-abstraction';
+import { NatsRpc } from 'rpc-nats-alvamind';
 @injectable()
 export class CategoryController {
   constructor(
     @inject(CategoryService) private readonly categoryService: CategoryService,
-    @inject(NATSAbstraction) private readonly nats: NATSAbstraction,
-  ) {
-    this.nats.registerAll(this);
-  }
-  async getCategoryById(id: number) {
+    @inject(NatsRpc) private readonly natsRpc: NatsRpc,
+  ) {}
+  async getCategoryById(id: { id: number }) {
     console.log('CategoryController.getCategoryById called with id:', id);
     try {
       const categoryId = typeof id === 'object' ? (id as any).id : id;
@@ -367,14 +364,17 @@ export class CategoryService {
 import { Prisma } from '@prisma/client';
 import { ProductService } from './product.service';
 import { inject, injectable } from 'tsyringe-neo';
-import { NATSAbstraction } from '../../nats/nats-abstraction';
+import { NatsRpc } from 'rpc-nats-alvamind';
+import { Category } from '../../types/general.type';
+import { CategoryController } from '../category/category.controller';
 @injectable()
 export class ProductController {
+  private categoryController: CategoryController;
   constructor(
     @inject(ProductService) private readonly productService: ProductService,
-    @inject(NATSAbstraction) private readonly nats: NATSAbstraction,
+    @inject(NatsRpc) private readonly natsRpc: NatsRpc,
   ) {
-    this.nats.registerAll(this);
+    this.categoryController = this.natsRpc.getControllerProxy<CategoryController>('CategoryController');
   }
   async getProductById(id: number) {
     console.log('getProductById called', id);
@@ -397,9 +397,9 @@ export class ProductController {
         console.log('Product not found');
         return null;
       }
-      let category = null;
+      let category: Category | null = null;
       try {
-        category = await this.nats.call('CategoryController.getCategoryById', {
+        category = await this.categoryController.getCategoryById({
           id: product.categoryId,
         });
         console.log('Category response:', category);
@@ -439,165 +439,6 @@ export class ProductService {
   }
 }
 
-// src/nats/controller-registry.ts
-import { DependencyContainer } from 'tsyringe-neo';
-import { NATSAbstraction } from './nats-abstraction';
-import { createProxyController } from './nats-scanner';
-export class ControllerRegistry {
-  private controllers: { [key: string]: any } = {};
-  constructor(
-    private readonly nats: NATSAbstraction,
-    private readonly container: DependencyContainer,
-  ) {}
-  async registerAll() {
-    if (!this.container) {
-      console.error('Container is undefined!');
-      return;
-    }
-    const tokens = this.container.registeredTokens();
-    for (const token of tokens) {
-      try {
-        let instance = this.container.resolve(token);
-        if (instance?.constructor?.name?.includes('Controller')) {
-          await this.nats.registerAll(instance);
-          const proxy = createProxyController(instance, this.nats);
-          this.controllers[instance.constructor.name] = proxy;
-        }
-      } catch (error) {
-        console.error(`Error registering controller for token ${String(token)}:`, error);
-      }
-    }
-  }
-  get<T>(controllerName: string): T {
-    const controller = this.controllers[controllerName];
-    if (!controller) {
-      throw new Error(`Controller ${controllerName} not found in registry`);
-    }
-    return controller;
-  }
-}
-
-// src/nats/nats-abstraction.ts
-import { connect, NatsConnection } from 'nats';
-import { getAllImplementedInterfaces, getAllInterfaceMethods } from './nats-scanner';
-interface RPCHandler<T, R> {
-  (data: T): Promise<R>;
-}
-export class NATSAbstraction {
-  private nc?: NatsConnection;
-  private handlers = new Map<string, RPCHandler<any, any>>();
-  private isConnected = false;
-  constructor(private server: string) {}
-  private async ensureConnection() {
-    if (!this.isConnected) {
-      await this.connect();
-    }
-  }
-  async connect() {
-    if (!this.isConnected) {
-      this.nc = await connect({ servers: this.server });
-      this.isConnected = true;
-      console.log(`[NATS] Connected to ${this.server}`);
-      this.nc.closed().then(() => {
-        console.log('[NATS] Connection closed');
-        this.isConnected = false;
-      });
-    }
-  }
-  async call<T, R>(subject: string, data: T): Promise<R> {
-    await this.ensureConnection();
-    try {
-      const encodedData = new TextEncoder().encode(JSON.stringify(data));
-      const response = await this.nc!.request(subject, encodedData, {
-        timeout: 10000, // Increase timeout to 10 seconds
-      });
-      const decodedData = new TextDecoder().decode(response.data);
-      return JSON.parse(decodedData) as R;
-    } catch (error) {
-      console.error(`[NATS] Error calling ${subject}:`, error);
-      throw error;
-    }
-  }
-  async register<T, R>(subject: string, handler: RPCHandler<T, R>) {
-    await this.ensureConnection();
-    if (this.handlers.has(subject)) {
-      console.warn(`[NATS] Handler already registered for subject: ${subject}`);
-      return;
-    }
-    console.log(`[NATS] Registering handler for ${subject}`);
-    this.handlers.set(subject, handler);
-    const subscription = this.nc!.subscribe(subject);
-    (async () => {
-      for await (const msg of subscription) {
-        try {
-          const decodedData = new TextDecoder().decode(msg.data);
-          const data = JSON.parse(decodedData);
-          const result = await handler(data);
-          const response = new TextEncoder().encode(JSON.stringify(result));
-          msg.respond(response);
-        } catch (error) {
-          console.error(`[NATS] Error processing message for ${subject}:`, error);
-          const errorResponse = new TextEncoder().encode(JSON.stringify({ error: (error as Error).message }));
-          msg.respond(errorResponse);
-        }
-      }
-    })().catch((err) => console.error(`[NATS] Subscription error:`, err));
-  }
-  async registerAll(controller: any) {
-    const interfaces = getAllImplementedInterfaces(controller);
-    for (const interfaceClass of interfaces) {
-      const methods = getAllInterfaceMethods(interfaceClass);
-      for (const { key, subject } of methods) {
-        try {
-          await this.register(subject, async (data: any) => {
-            return controller[key](data);
-          });
-        } catch (e) {
-          console.error(`[NATS] Failed to register handler for ${subject} `, e);
-        }
-      }
-    }
-  }
-  close() {
-    if (this.nc) {
-      this.nc.close();
-    }
-  }
-}
-
-// src/nats/nats-scanner.ts
-import 'reflect-metadata';
-interface MethodMetadata {
-  key: string;
-  subject: string;
-}
-export function getAllImplementedInterfaces(target: any): any[] {
-  const interfaces = Reflect.getMetadata('design:interfaces', target) || [];
-  return interfaces;
-}
-export function getAllInterfaceMethods(interfaceClass: any): MethodMetadata[] {
-  const methods: MethodMetadata[] = [];
-  if (!interfaceClass || !interfaceClass.prototype) return methods;
-  for (const key of Object.getOwnPropertyNames(interfaceClass.prototype)) {
-    if (key === 'constructor') continue;
-    methods.push({ key, subject: `${interfaceClass.name}.${key}` });
-  }
-  return methods;
-}
-export function createProxyController<T>(controller: T, nats: any): T {
-  const handler = {
-    get(target: any, prop: string, receiver: any) {
-      if (typeof target[prop] === 'function') {
-        return async (...args: any[]) => {
-          return nats.call(`${target.constructor.name}.${prop}`, args[0]);
-        };
-      }
-      return Reflect.get(target, prop, receiver);
-    },
-  };
-  return new Proxy(controller, handler) as T;
-}
-
 // src/persistence/prisma/prisma-client.ts
 import { PrismaClient } from '@prisma/client';
 import { logger } from '../../common/utils/logger.utils';
@@ -612,17 +453,24 @@ prismaClient
   });
 
 // src/types/general.type.ts
-    import { appRouter, trpc } from "../config/trpc.config";
-    import { ContextWithContainer } from "../elysia.context";
-    export type TRPC = typeof trpc;
-    export type AppRouter = typeof appRouter;
-    export interface RetryConfigInterface {
-        maxRetries: number;
-        initialDelay: number;
-        maxDelay: number;
-        factor: number;
-    }
-    export type TRPCContext = ContextWithContainer;
+import { appRouter, trpc } from '../config/trpc.config';
+import { ContextWithContainer } from '../elysia.context';
+export type TRPC = typeof trpc;
+export type AppRouter = typeof appRouter;
+export interface RetryConfigInterface {
+  maxRetries: number;
+  initialDelay: number;
+  maxDelay: number;
+  factor: number;
+}
+export type TRPCContext = ContextWithContainer;
+export interface Category {
+  id: number;
+  name: string;
+  description: string;
+  createdAt?: Date;
+  updatedAt?: Date;
+}
 
 // tsconfig.json
 {
@@ -631,7 +479,7 @@ prismaClient
     "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "types": [],
+    "types": ["bun-types", "node"],
     "strict": true,
     "skipLibCheck": true,
     "noEmit": false,
