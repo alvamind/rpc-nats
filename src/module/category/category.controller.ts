@@ -9,11 +9,24 @@ export class CategoryController {
     @inject(CategoryService) private readonly categoryService: CategoryService,
     @inject(NATSAbstraction) private readonly nats: NATSAbstraction,
   ) {
+    // Hapus setTimeout dan langsung register
     this.nats.registerAll(this);
   }
 
   async getCategoryById(id: number) {
-    return await this.categoryService.findUnique({ where: { id } });
+    console.log('CategoryController.getCategoryById called with id:', id);
+    try {
+      // Perbaiki handling parameter
+      const categoryId = typeof id === 'object' ? (id as any).id : id;
+      const result = await this.categoryService.findUnique({
+        where: { id: categoryId },
+      });
+      console.log('CategoryController.getCategoryById result:', result);
+      return result;
+    } catch (error) {
+      console.error('Error in CategoryController.getCategoryById:', error);
+      throw error;
+    }
   }
 
   async getCategoryCount(): Promise<number> {

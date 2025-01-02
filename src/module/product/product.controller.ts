@@ -13,6 +13,7 @@ export class ProductController {
   }
 
   async getProductById(id: number) {
+    console.log('getProductById called', id);
     return await this.productService.findUnique({ where: { id } });
   }
 
@@ -29,14 +30,32 @@ export class ProductController {
   }
 
   async getProductWithCategory(id: number) {
-    // Misal mau ambil product dengan category
-    const product = await this.productService.findUnique({ where: { id } });
-    if (!product) return null;
-    // **Manggil `CategoryController.getCategoryById` lewat NATS**
-    const category = await this.nats.call('CategoryController.getCategoryById', { id: product.categoryId });
-    return {
-      ...product,
-      category,
-    };
+    try {
+      console.log('getProductWithCategory called', id);
+      const product = await this.productService.findUnique({ where: { id } });
+
+      if (!product) {
+        console.log('Product not found');
+        return null;
+      }
+
+      let category = null;
+      try {
+        category = await this.nats.call('CategoryController.getCategoryById', {
+          id: product.categoryId,
+        });
+        console.log('Category response:', category);
+      } catch (err) {
+        console.error('Failed to fetch category:', err);
+      }
+
+      return {
+        ...product,
+        category,
+      };
+    } catch (error) {
+      console.error('Error in getProductWithCategory:', error);
+      throw error;
+    }
   }
 }

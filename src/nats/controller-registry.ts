@@ -1,4 +1,4 @@
-import { DependencyContainer, isValueProvider, isClassProvider, isFactoryProvider } from 'tsyringe-neo';
+import { DependencyContainer } from 'tsyringe-neo';
 import { NATSAbstraction } from './nats-abstraction';
 import { createProxyController } from './nats-scanner';
 
@@ -10,26 +10,24 @@ export class ControllerRegistry {
     private readonly container: DependencyContainer,
   ) {}
 
-  registerAll() {
+  async registerAll() {
+    // console.log('this.container:', this.container);
+    if (!this.container) {
+      console.error('Container is undefined!');
+      return;
+    }
     const tokens = this.container.registeredTokens();
-
     for (const token of tokens) {
-      let instance: any;
-
-      if (this.container.isRegistered(token)) {
-        const provider = this.container.resolve(token);
-        if (isValueProvider(provider)) {
-          instance = provider.useValue;
-        } else if (isClassProvider(provider)) {
-          instance = this.container.resolve(token);
-        } else if (isFactoryProvider(provider)) {
-          instance = this.container.resolve(token);
-        }
-
-        if (typeof instance === 'object' && instance !== null && instance?.constructor?.name?.includes('Controller')) {
+      try {
+        let instance = this.container.resolve(token);
+        if (instance?.constructor?.name?.includes('Controller')) {
+          // console.log(`Registering controller: ${instance.constructor.name}`);
+          await this.nats.registerAll(instance);
           const proxy = createProxyController(instance, this.nats);
           this.controllers[instance.constructor.name] = proxy;
         }
+      } catch (error) {
+        console.error(`Error registering controller for token ${String(token)}:`, error);
       }
     }
   }

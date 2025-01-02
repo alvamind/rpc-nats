@@ -1,65 +1,87 @@
 import { connect, NatsConnection } from 'nats';
 import { getAllImplementedInterfaces, getAllInterfaceMethods } from './nats-scanner';
-
 interface RPCHandler<T, R> {
   (data: T): Promise<R>;
 }
-
 export class NATSAbstraction {
-  private nc?: NatsConnection; //Make it optional
+  private nc?: NatsConnection;
   private handlers = new Map<string, RPCHandler<any, any>>();
+  private isConnected = false;
   constructor(private server: string) {}
+
+  private async ensureConnection() {
+    if (!this.isConnected) {
+      await this.connect();
+    }
+  }
+
   async connect() {
-    this.nc = await connect({ servers: this.server });
-    console.log(`[NATS] Connected to ${this.server}`);
-    this.nc.closed().then(() => {
-      console.log('[NATS] Connection closed');
-    });
+    if (!this.isConnected) {
+      this.nc = await connect({ servers: this.server });
+      this.isConnected = true;
+      console.log(`[NATS] Connected to ${this.server}`);
+      this.nc.closed().then(() => {
+        console.log('[NATS] Connection closed');
+        this.isConnected = false;
+      });
+    }
   }
   async call<T, R>(subject: string, data: T): Promise<R> {
-    if (!this.nc) {
-      throw new Error('NATS not connected');
+    await this.ensureConnection();
+
+    try {
+      const encodedData = new TextEncoder().encode(JSON.stringify(data));
+      const response = await this.nc!.request(subject, encodedData, {
+        timeout: 10000, // Increase timeout to 10 seconds
+      });
+      const decodedData = new TextDecoder().decode(response.data);
+      return JSON.parse(decodedData) as R;
+    } catch (error) {
+      console.error(`[NATS] Error calling ${subject}:`, error);
+      throw error;
     }
-    const encodedData = new TextEncoder().encode(JSON.stringify(data));
-    const response = await this.nc.request(subject, encodedData, { timeout: 5000 });
-    const decodedData = new TextDecoder().decode(response.data);
-    return JSON.parse(decodedData) as R;
   }
-  register<T, R>(subject: string, handler: RPCHandler<T, R>) {
-    if (!this.nc) {
-      throw new Error('NATS not connected');
-    }
+  async register<T, R>(subject: string, handler: RPCHandler<T, R>) {
+    await this.ensureConnection();
+
     if (this.handlers.has(subject)) {
-      throw new Error(`Handler already registered for subject: ${subject}`);
+      console.warn(`[NATS] Handler already registered for subject: ${subject}`);
+      return;
     }
+
+    console.log(`[NATS] Registering handler for ${subject}`);
     this.handlers.set(subject, handler);
-    this.nc.subscribe(subject, {
-      callback: (err, msg) => {
-        if (err) {
-          console.error(`[NATS] Error on ${subject} sub: ${err.message}`);
-          return;
+
+    const subscription = this.nc!.subscribe(subject);
+    (async () => {
+      for await (const msg of subscription) {
+        try {
+          const decodedData = new TextDecoder().decode(msg.data);
+          const data = JSON.parse(decodedData);
+          const result = await handler(data);
+          const response = new TextEncoder().encode(JSON.stringify(result));
+          msg.respond(response);
+        } catch (error) {
+          console.error(`[NATS] Error processing message for ${subject}:`, error);
+          const errorResponse = new TextEncoder().encode(JSON.stringify({ error: (error as Error).message }));
+          msg.respond(errorResponse);
         }
-        const decodedData = new TextDecoder().decode(msg.data);
-        const data: T = JSON.parse(decodedData) as T;
-        handler(data)
-          .then((result) => {
-            const encodedData = new TextEncoder().encode(JSON.stringify(result));
-            msg.respond(encodedData);
-          })
-          .catch((e) => {
-            console.error(`[NATS] Error processing message for ${subject}: ${e.message}`);
-          });
-      },
-    });
+      }
+    })().catch((err) => console.error(`[NATS] Subscription error:`, err));
   }
-  registerAll(controller: any) {
+  async registerAll(controller: any) {
     const interfaces = getAllImplementedInterfaces(controller);
     for (const interfaceClass of interfaces) {
       const methods = getAllInterfaceMethods(interfaceClass);
       for (const { key, subject } of methods) {
-        this.register(subject, async (data: any) => {
-          return controller[key](data);
-        });
+        try {
+          await this.register(subject, async (data: any) => {
+            // console.log(`[NATS] Handler ${subject} called`); // HAPUS LOG INI
+            return controller[key](data);
+          });
+        } catch (e) {
+          console.error(`[NATS] Failed to register handler for ${subject} `, e);
+        }
       }
     }
   }

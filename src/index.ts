@@ -28,13 +28,10 @@ const createErrorResponse = ({ code, error, request }: any): Response => {
   });
 };
 const startTime = performance.now();
+
 const app = new Elysia()
   .onStart(async () => {
-    initializeApp();
-    // Tambahkan code ini untuk test langsung
-    const productController = container.resolve<ProductController>(ProductController); // Resolve dengan type
-    const result = await productController.getProductWithCategory(1);
-    console.log('result from getProductWithCategory : ', result);
+    await initializeApp();
   })
   .onRequest(logRequestStart)
   .use(
@@ -47,6 +44,15 @@ const app = new Elysia()
       },
     }),
   )
+  .get('/test', async (ctx) => {
+    const productController = container.resolve<ProductController>(ProductController);
+    const result = await productController.getProductWithCategory(1);
+    console.log('result from getProductWithCategory : ', result);
+    return result;
+  })
+  .get('/favicon.ico', () => {
+    return new Response(null, { status: 204 });
+  })
   .onAfterResponse((context: any) => {
     const start = requestTimings.get(context.request);
     if (start) {
@@ -57,6 +63,7 @@ const app = new Elysia()
   })
   .onError(createErrorResponse)
   .listen(3000);
+
 const endTime = performance.now();
 const startupTime = endTime - startTime;
 logger.warn(`🦊 Elysia is running at ${app.server?.hostname}:${app.server?.port} in ${startupTime.toFixed(2)}ms`);
