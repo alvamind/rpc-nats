@@ -1,0 +1,94 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.configSchema = void 0;
+const utils_1 = require("../utils");
+const zod_1 = require("zod");
+exports.configSchema = zod_1.z.object({
+    useMultipleFiles: zod_1.z
+        .string()
+        .optional()
+        .default('false')
+        .transform((val) => val === 'true'),
+    writeBarrelFiles: zod_1.z
+        .string()
+        .optional()
+        .default('true')
+        .transform((val) => val === 'true'),
+    createInputTypes: zod_1.z
+        .string()
+        .optional()
+        .default('true')
+        .transform((val) => val === 'true'),
+    createModelTypes: zod_1.z
+        .string()
+        .optional()
+        .default('true')
+        .transform((val) => val === 'true'),
+    createOptionalDefaultValuesTypes: zod_1.z
+        .string()
+        .optional()
+        .default('false')
+        .transform((val) => val === 'true'),
+    createRelationValuesTypes: zod_1.z
+        .string()
+        .optional()
+        .default('false')
+        .transform((val) => val === 'true'),
+    createPartialTypes: zod_1.z
+        .string()
+        .optional()
+        .default('false')
+        .transform((val) => val === 'true'),
+    addInputTypeValidation: zod_1.z
+        .string()
+        .optional()
+        .default('true')
+        .transform((val) => val === 'true'),
+    addIncludeType: zod_1.z
+        .string()
+        .optional()
+        .default('true')
+        .transform((val) => val === 'true'),
+    addSelectType: zod_1.z
+        .string()
+        .optional()
+        .default('true')
+        .transform((val) => val === 'true'),
+    validateWhereUniqueInput: zod_1.z
+        .string()
+        .optional()
+        .default('true')
+        .transform((val) => val === 'true'),
+    useDefaultValidators: zod_1.z
+        .string()
+        .optional()
+        .default('true')
+        .transform((val) => val === 'true'),
+    coerceDate: zod_1.z
+        .string()
+        .optional()
+        .default('true')
+        .transform((val) => val === 'true'),
+    writeNullishInModelTypes: zod_1.z
+        .string()
+        .optional()
+        .default('false')
+        .transform((val) => val === 'true'),
+    useTypeAssertions: zod_1.z
+        .string()
+        .optional()
+        .default('false')
+        .transform((val) => val === 'true'),
+    prismaClientPath: zod_1.z.string().default('@prisma/client'),
+    provider: zod_1.z.string().optional(),
+    isMongoDb: zod_1.z
+        .string()
+        .optional()
+        .default('false')
+        .transform((val) => val === 'true'),
+    inputTypePath: zod_1.z.string().optional().default('inputTypeSchemas'),
+    outputTypePath: zod_1.z.string().optional().default('outputTypeSchemas'),
+    prismaVersion: utils_1.PrismaVersionSchema.optional(),
+    decimalJSInstalled: zod_1.z.boolean().default(false),
+});
+//# sourceMappingURL=generatorConfigSchema.js.map

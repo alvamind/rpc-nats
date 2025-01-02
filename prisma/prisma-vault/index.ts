@@ -1,0 +1,5 @@
+export type { Prisma, PrismaClient, PrismaPromise } from "./PrismaClientForVault.js"
+export type { IPrismaDelegate } from "./IPrismaDelegate.js"
+export { PrismaProxy } from "./PrismaProxy.js"
+export { EncapsulatedPrismaRepository } from "./EncapsulatedPrismaRepository.js"
+export { ExposedPrismaRepository } from "./ExposedPrismaRepository.js"
