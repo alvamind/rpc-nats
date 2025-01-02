@@ -4,6 +4,7 @@
   "scripts": {
     "seed": "bunx prisma db seed",
     "dev": "bun run src/index.ts --watch",
+    "generate": "bunx prisma generate",
     "compose": "docker compose up -d",
     "commit": "commit",
     "source": "generate-source output=source.md exclude=build/",

@@ -1,4 +1,3 @@
-// src/nats/nats-abstraction.ts
 import { connect, NatsConnection, Subscription } from 'nats';
 import { getAllImplementedInterfaces, getAllInterfaceMethods } from './nats-scanner';
 
@@ -7,11 +6,9 @@ interface RPCHandler<T, R> {
 }
 
 export class NATSAbstraction {
-  private nc: NatsConnection;
+  private nc?: NatsConnection; //Make it optional
   private handlers = new Map<string, RPCHandler<any, any>>();
-
   constructor(private server: string) {}
-
   async connect() {
     this.nc = await connect({ servers: this.server });
     console.log(`[NATS] Connected to ${this.server}`);
@@ -19,21 +16,23 @@ export class NATSAbstraction {
       console.log('[NATS] Connection closed');
     });
   }
-
   async call<T, R>(subject: string, data: T): Promise<R> {
+    if (!this.nc) {
+      throw new Error('NATS not connected');
+    }
     const encodedData = new TextEncoder().encode(JSON.stringify(data));
     const response = await this.nc.request(subject, encodedData, { timeout: 5000 });
     const decodedData = new TextDecoder().decode(response.data);
     return JSON.parse(decodedData) as R;
   }
-
   register<T, R>(subject: string, handler: RPCHandler<T, R>) {
+    if (!this.nc) {
+      throw new Error('NATS not connected');
+    }
     if (this.handlers.has(subject)) {
       throw new Error(`Handler already registered for subject: ${subject}`);
     }
-
     this.handlers.set(subject, handler);
-
     this.nc.subscribe(subject, {
       callback: (err, msg) => {
         if (err) {
@@ -53,7 +52,6 @@ export class NATSAbstraction {
       },
     });
   }
-
   registerAll(controller: any) {
     const interfaces = getAllImplementedInterfaces(controller);
     for (const interfaceClass of interfaces) {
@@ -66,6 +64,8 @@ export class NATSAbstraction {
     }
   }
   close() {
-    this.nc.close();
+    if (this.nc) {
+      this.nc.close();
+    }
   }
 }

@@ -1,5 +1,4 @@
-// src/nats/controller-registry.ts
-import { container, DependencyContainer } from 'tsyringe-neo';
+import { DependencyContainer, isValueProvider, isClassProvider, isFactoryProvider } from 'tsyringe-neo';
 import { NATSAbstraction } from './nats-abstraction';
 import { createProxyController } from './nats-scanner';
 
@@ -12,14 +11,29 @@ export class ControllerRegistry {
   ) {}
 
   registerAll() {
-    const instances = container.getRegistry().entries();
-    for (const [key, value] of instances) {
-      if (typeof value === 'object' && value !== null && value?.useValue?.constructor?.name?.includes('Controller')) {
-        const proxy = createProxyController(value.useValue, this.nats);
-        this.controllers[value.useValue.constructor.name] = proxy;
+    const tokens = this.container.registeredTokens();
+
+    for (const token of tokens) {
+      let instance: any;
+
+      if (this.container.isRegistered(token)) {
+        const provider = this.container.resolve(token);
+        if (isValueProvider(provider)) {
+          instance = provider.useValue;
+        } else if (isClassProvider(provider)) {
+          instance = this.container.resolve(token);
+        } else if (isFactoryProvider(provider)) {
+          instance = this.container.resolve(token);
+        }
+
+        if (typeof instance === 'object' && instance !== null && instance?.constructor?.name?.includes('Controller')) {
+          const proxy = createProxyController(instance, this.nats);
+          this.controllers[instance.constructor.name] = proxy;
+        }
       }
     }
   }
+
   get<T>(controllerName: string): T {
     const controller = this.controllers[controllerName];
     if (!controller) {
