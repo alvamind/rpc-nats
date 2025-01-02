@@ -2,9 +2,7 @@
     provider        = "prisma-client-js"
     previewFeatures = ["driverAdapters"]
     }
-    generator vault {
-    provider = "prisma-generator-vault"
-    }
+
     datasource db {
     provider = "postgresql"
     url      = env("DATABASE_URL")

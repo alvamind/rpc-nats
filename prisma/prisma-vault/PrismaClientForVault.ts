@@ -1,1 +1,0 @@
-export type { Prisma, PrismaClient, PrismaPromise } from "@prisma/client"
