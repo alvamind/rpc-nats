@@ -26,6 +26,7 @@ src/types
   "scripts": {
     "seed": "bunx prisma db seed",
     "dev": "bun run src/index.ts --watch",
+    "generate": "bunx prisma generate",
     "compose": "docker compose up -d",
     "commit": "commit",
     "source": "generate-source output=source.md exclude=build/",
@@ -215,65 +216,64 @@ export const appRouter = trpc.router({
     };
 
 // src/index.ts
-    import 'reflect-metadata';
-    import { Elysia } from 'elysia';
-    import { logger } from './common/utils/logger.utils';
-    import { ContextWithContainer } from './elysia.context';
-    import { execSync } from 'child_process';
-    import { container } from './config/dependency.config';
-    import { initializeApp } from './app.module';
-    import { t } from 'elysia';
-    import { trpc } from '@elysiajs/trpc';
-    import { appRouter } from './config/trpc.config';
-    execSync('clear', { stdio: 'inherit' });
-    const requestTimings = new WeakMap<any, number>();
-    const logRequestStart = ({ request }: any) => {
-      logger.info(`[${request.method}] ${request.url} - START`);
-      requestTimings.set(request, performance.now());
-    };
-    const createErrorResponse = ({ code, error, request }: any): Response => {
-      logger.error(`[${request.method}] ${request.url} - ERROR - ${code} - ${error.message}`);
-      const errorResponse = {
-        code,
-        message: error.message,
-      };
-      return new Response(JSON.stringify(errorResponse), {
-        status: 500,
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-    };
-    const startTime = performance.now();
-    const app = new Elysia()
-      .onStart(async () => {
-        initializeApp();
-      })
-      .onRequest(logRequestStart)
-        .use(
-            trpc(appRouter, {
-                createContext: async (opts) => {
-                    return {
-                    opts,
-                    container
-                } as ContextWithContainer;
-              },
-            }),
-    )
-      .onAfterResponse((context: any) => {
-        const start = requestTimings.get(context.request);
-        if (start) {
-          const duration = performance.now() - start;
-          logger.info(`[${context.request.method}] ${context.request.url} - END - ${duration} ms`);
-          requestTimings.delete(context.request);
-        }
-      })
-      .onError(createErrorResponse)
-      .listen(3000);
-    const endTime = performance.now();
-    const startupTime = endTime - startTime;
-    logger.warn(`🦊 Elysia is running at ${app.server?.hostname}:${app.server?.port} in ${startupTime.toFixed(2)}ms`);
-    export { app };
+import 'reflect-metadata';
+import { Elysia } from 'elysia';
+import { logger } from './common/utils/logger.utils';
+import { ContextWithContainer } from './elysia.context';
+import { execSync } from 'child_process';
+import { container } from './config/dependency.config';
+import { initializeApp } from './app.module';
+import { trpc } from '@elysiajs/trpc';
+import { appRouter } from './config/trpc.config';
+execSync('clear', { stdio: 'inherit' });
+const requestTimings = new WeakMap<any, number>();
+const logRequestStart = ({ request }: any) => {
+  logger.info(`[${request.method}] ${request.url} - START`);
+  requestTimings.set(request, performance.now());
+};
+const createErrorResponse = ({ code, error, request }: any): Response => {
+  logger.error(`[${request.method}] ${request.url} - ERROR - ${code} - ${error.message}`);
+  const errorResponse = {
+    code,
+    message: error.message,
+  };
+  return new Response(JSON.stringify(errorResponse), {
+    status: 500,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
+};
+const startTime = performance.now();
+const app = new Elysia()
+  .onStart(async () => {
+    initializeApp();
+  })
+  .onRequest(logRequestStart)
+  .use(
+    trpc(appRouter, {
+      createContext: async (opts) => {
+        return {
+          opts,
+          container,
+        } as ContextWithContainer;
+      },
+    }),
+  )
+  .onAfterResponse((context: any) => {
+    const start = requestTimings.get(context.request);
+    if (start) {
+      const duration = performance.now() - start;
+      logger.info(`[${context.request.method}] ${context.request.url} - END - ${duration} ms`);
+      requestTimings.delete(context.request);
+    }
+  })
+  .onError(createErrorResponse)
+  .listen(3000);
+const endTime = performance.now();
+const startupTime = endTime - startTime;
+logger.warn(`🦊 Elysia is running at ${app.server?.hostname}:${app.server?.port} in ${startupTime.toFixed(2)}ms`);
+export { app };
 
 // src/module/category/category.controller.ts
 import { Prisma } from '@prisma/client';
@@ -288,14 +288,14 @@ export class CategoryController {
   ) {
     this.nats.registerAll(this);
   }
-  async getCategoryById(id: number): Promise<Prisma.Category | null> {
-    return await this.categoryService.findUnique({ where: { id } });
+  async getCategoryById(id: number) {
+    return await this.categoryService.findUnique({ where: { id } }); // Panggil service
   }
   async getCategoryCount(): Promise<number> {
     return await this.categoryService.count({});
   }
-  async createCategory(data: Prisma.CategoryCreateInput): Promise<Prisma.Category> {
-    return await this.categoryService.create({ data });
+  async createCategory(data: Prisma.CategoryCreateInput) {
+    return await this.categoryService.create({ data }); // Panggil service
   }
   async aggregate(categoryAggregateArgs: Prisma.CategoryAggregateArgs) {
     return await this.categoryService.aggregate(categoryAggregateArgs);
@@ -309,6 +309,12 @@ import { prismaClient } from '../../persistence/prisma/prisma-client';
 @injectable()
 export class CategoryService {
   constructor(private prisma: typeof prismaClient) {}
+  async findUnique(args: Prisma.CategoryFindUniqueArgs) {
+    return await this.prisma.category.findUnique(args);
+  }
+  async create(args: Prisma.CategoryCreateArgs) {
+    return await this.prisma.category.create(args);
+  }
   async aggregate(categoryAggregateArgs: Prisma.CategoryAggregateArgs) {
     return await this.prisma.category.aggregate(categoryAggregateArgs);
   }
@@ -330,14 +336,14 @@ export class ProductController {
   ) {
     this.nats.registerAll(this);
   }
-  async getProductById(id: number): Promise<Prisma.Product | null> {
-    return await this.findUnique({ where: { id } });
+  async getProductById(id: number) {
+    return await this.productService.findUnique({ where: { id } }); // Panggil service
   }
   async getProductCount(): Promise<number> {
     return await this.productService.count({});
   }
-  async createProduct(data: Prisma.ProductCreateInput): Promise<Prisma.Product> {
-    return await this.create({ data });
+  async createProduct(data: Prisma.ProductCreateInput) {
+    return await this.productService.create({ data }); // Panggil service
   }
   async aggregate(productAggregateArgs: Prisma.ProductAggregateArgs) {
     return await this.productService.aggregate(productAggregateArgs);
@@ -351,6 +357,12 @@ import { prismaClient } from '../../persistence/prisma/prisma-client';
 @injectable()
 export class ProductService {
   constructor(private prisma: typeof prismaClient) {}
+  async findUnique(args: Prisma.ProductFindUniqueArgs) {
+    return await this.prisma.product.findUnique(args);
+  }
+  async create(args: Prisma.ProductCreateArgs) {
+    return await this.prisma.product.create(args);
+  }
   async aggregate(productAggregateArgs: Prisma.ProductAggregateArgs) {
     return await this.prisma.product.aggregate(productAggregateArgs);
   }
@@ -360,7 +372,7 @@ export class ProductService {
 }
 
 // src/nats/controller-registry.ts
-import { container, DependencyContainer } from 'tsyringe-neo';
+import { DependencyContainer, isValueProvider, isClassProvider, isFactoryProvider } from 'tsyringe-neo';
 import { NATSAbstraction } from './nats-abstraction';
 import { createProxyController } from './nats-scanner';
 export class ControllerRegistry {
@@ -370,11 +382,22 @@ export class ControllerRegistry {
     private readonly container: DependencyContainer,
   ) {}
   registerAll() {
-    const instances = container.getRegistry().entries();
-    for (const [key, value] of instances) {
-      if (typeof value === 'object' && value !== null && value?.useValue?.constructor?.name?.includes('Controller')) {
-        const proxy = createProxyController(value.useValue, this.nats);
-        this.controllers[value.useValue.constructor.name] = proxy;
+    const tokens = this.container.registeredTokens();
+    for (const token of tokens) {
+      let instance: any;
+      if (this.container.isRegistered(token)) {
+        const provider = this.container.resolve(token);
+        if (isValueProvider(provider)) {
+          instance = provider.useValue;
+        } else if (isClassProvider(provider)) {
+          instance = this.container.resolve(token);
+        } else if (isFactoryProvider(provider)) {
+          instance = this.container.resolve(token);
+        }
+        if (typeof instance === 'object' && instance !== null && instance?.constructor?.name?.includes('Controller')) {
+          const proxy = createProxyController(instance, this.nats);
+          this.controllers[instance.constructor.name] = proxy;
+        }
       }
     }
   }
@@ -394,7 +417,7 @@ interface RPCHandler<T, R> {
   (data: T): Promise<R>;
 }
 export class NATSAbstraction {
-  private nc: NatsConnection;
+  private nc?: NatsConnection; //Make it optional
   private handlers = new Map<string, RPCHandler<any, any>>();
   constructor(private server: string) {}
   async connect() {
@@ -405,12 +428,18 @@ export class NATSAbstraction {
     });
   }
   async call<T, R>(subject: string, data: T): Promise<R> {
+    if (!this.nc) {
+      throw new Error('NATS not connected');
+    }
     const encodedData = new TextEncoder().encode(JSON.stringify(data));
     const response = await this.nc.request(subject, encodedData, { timeout: 5000 });
     const decodedData = new TextDecoder().decode(response.data);
     return JSON.parse(decodedData) as R;
   }
   register<T, R>(subject: string, handler: RPCHandler<T, R>) {
+    if (!this.nc) {
+      throw new Error('NATS not connected');
+    }
     if (this.handlers.has(subject)) {
       throw new Error(`Handler already registered for subject: ${subject}`);
     }
@@ -446,7 +475,9 @@ export class NATSAbstraction {
     }
   }
   close() {
-    this.nc.close();
+    if (this.nc) {
+      this.nc.close();
+    }
   }
 }
 

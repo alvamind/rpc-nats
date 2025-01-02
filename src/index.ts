@@ -7,6 +7,7 @@ import { container } from './config/dependency.config';
 import { initializeApp } from './app.module';
 import { trpc } from '@elysiajs/trpc';
 import { appRouter } from './config/trpc.config';
+import { ProductController } from './module/product/product.controller';
 execSync('clear', { stdio: 'inherit' });
 const requestTimings = new WeakMap<any, number>();
 const logRequestStart = ({ request }: any) => {
@@ -30,6 +31,10 @@ const startTime = performance.now();
 const app = new Elysia()
   .onStart(async () => {
     initializeApp();
+    // Tambahkan code ini untuk test langsung
+    const productController = container.resolve<ProductController>(ProductController); // Resolve dengan type
+    const result = await productController.getProductWithCategory(1);
+    console.log('result from getProductWithCategory : ', result);
   })
   .onRequest(logRequestStart)
   .use(

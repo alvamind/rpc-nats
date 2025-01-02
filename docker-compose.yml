@@ -1,0 +1,21 @@
+version: '3.9'
+services:
+  nats:
+    image: nats:latest
+    ports:
+      - '4222:4222'
+      - '8222:8222' # Monitoring
+    #  command: ["-js"] #optional kalau butuh jetstream
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: passwordrahasia
+      POSTGRES_DB: myapp
+    ports:
+      - '5432:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 10s
+      timeout: 5s
+      retries: 5
