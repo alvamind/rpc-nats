@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "scripts": {
     "seed": "bunx prisma db seed",
+    "db-reset": "bunx prisma db push --force-reset",
     "dev": "bun run src/index.ts --watch",
     "generate": "bunx prisma generate",
     "compose": "docker compose up -d",

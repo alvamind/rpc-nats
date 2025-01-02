@@ -14,10 +14,33 @@ src/persistence/prisma
 src/types
 ====================
 // .env
-    DATABASE_URL="postgresql://postgres:passwordrahasia@localhost:5432/myapp?schema=public&connection_limit=1"
-    REDIS_HOST="localhost"
-    REDIS_PORT=6379
-    NATS_URL="nats://localhost:4222"
+DATABASE_URL="postgresql://postgres:passwordrahasia@localhost:5432/myapp?schema=public&connection_limit=1"
+REDIS_HOST="localhost"
+REDIS_PORT=6379
+NATS_URL="nats://localhost:4222"
+
+// docker-compose.yml
+version: '3.9'
+services:
+  nats:
+    image: nats:latest
+    ports:
+      - '4222:4222'
+      - '8222:8222' # Monitoring
+    #  command: ["-js"] #optional kalau butuh jetstream
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: passwordrahasia
+      POSTGRES_DB: myapp
+    ports:
+      - '5432:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 // package.json
 {
@@ -25,6 +48,7 @@ src/types
   "version": "1.0.0",
   "scripts": {
     "seed": "bunx prisma db seed",
+    "db-reset": "bunx prisma db push --force-reset",
     "dev": "bun run src/index.ts --watch",
     "generate": "bunx prisma generate",
     "compose": "docker compose up -d",
@@ -86,32 +110,30 @@ src/types
     }
 
 // src/config/dependency.config.ts
-    import { container } from 'tsyringe-neo';
-    import { prismaClient } from '../persistence/prisma/prisma-client';
-    import { PrismaClient } from '@prisma/client';
-    import { ProductService } from '../module/product/product.service';
-    import { ProductController } from '../module/product/product.controller';
-    import { CategoryService } from '../module/category/category.service';
-    import { CategoryController } from '../module/category/category.controller';
-    import { NATSAbstraction } from '../nats/nats-abstraction';
-    import { ControllerRegistry } from '../nats/controller-registry';
-    container.register(PrismaClient, { useValue: prismaClient });
-    container.registerSingleton(ProductService);
-    container.registerSingleton(CategoryService);
-    container.registerSingleton(ProductController);
-    container.registerSingleton(CategoryController);
-    const CONTEXT_WITH_CONTAINER = Symbol.for('ContextWithContainer');
-    container.register(CONTEXT_WITH_CONTAINER, {
-    useFactory: (context) => {
-        return () => {
-        return {
-            context: context,
-            opts: {},
-        };
-        };
-    },
-    });
-    export { container };
+import { container } from 'tsyringe-neo';
+import { PrismaClient } from '@prisma/client'; // <-- Import PrismaClient
+import { prismaClient } from '../persistence/prisma/prisma-client';
+import { ProductService } from '../module/product/product.service';
+import { ProductController } from '../module/product/product.controller';
+import { CategoryService } from '../module/category/category.service';
+import { CategoryController } from '../module/category/category.controller';
+container.register(PrismaClient, { useValue: prismaClient });
+container.registerSingleton(ProductService);
+container.registerSingleton(CategoryService);
+container.registerSingleton(ProductController);
+container.registerSingleton(CategoryController);
+const CONTEXT_WITH_CONTAINER = Symbol.for('ContextWithContainer');
+container.register(CONTEXT_WITH_CONTAINER, {
+  useFactory: (context) => {
+    return () => {
+      return {
+        context: context,
+        opts: {},
+      };
+    };
+  },
+});
+export { container };
 
 // src/config/general.config.ts
 import * as dotenv from 'dotenv';
@@ -225,6 +247,7 @@ import { container } from './config/dependency.config';
 import { initializeApp } from './app.module';
 import { trpc } from '@elysiajs/trpc';
 import { appRouter } from './config/trpc.config';
+import { ProductController } from './module/product/product.controller';
 execSync('clear', { stdio: 'inherit' });
 const requestTimings = new WeakMap<any, number>();
 const logRequestStart = ({ request }: any) => {
@@ -248,6 +271,9 @@ const startTime = performance.now();
 const app = new Elysia()
   .onStart(async () => {
     initializeApp();
+    const productController = container.resolve<ProductController>(ProductController); // Resolve dengan type
+    const result = await productController.getProductWithCategory(1);
+    console.log('result from getProductWithCategory : ', result);
   })
   .onRequest(logRequestStart)
   .use(
@@ -289,13 +315,13 @@ export class CategoryController {
     this.nats.registerAll(this);
   }
   async getCategoryById(id: number) {
-    return await this.categoryService.findUnique({ where: { id } }); // Panggil service
+    return await this.categoryService.findUnique({ where: { id } });
   }
   async getCategoryCount(): Promise<number> {
     return await this.categoryService.count({});
   }
   async createCategory(data: Prisma.CategoryCreateInput) {
-    return await this.categoryService.create({ data }); // Panggil service
+    return await this.categoryService.create({ data });
   }
   async aggregate(categoryAggregateArgs: Prisma.CategoryAggregateArgs) {
     return await this.categoryService.aggregate(categoryAggregateArgs);
@@ -337,23 +363,32 @@ export class ProductController {
     this.nats.registerAll(this);
   }
   async getProductById(id: number) {
-    return await this.productService.findUnique({ where: { id } }); // Panggil service
+    return await this.productService.findUnique({ where: { id } });
   }
   async getProductCount(): Promise<number> {
     return await this.productService.count({});
   }
   async createProduct(data: Prisma.ProductCreateInput) {
-    return await this.productService.create({ data }); // Panggil service
+    return await this.productService.create({ data });
   }
   async aggregate(productAggregateArgs: Prisma.ProductAggregateArgs) {
     return await this.productService.aggregate(productAggregateArgs);
   }
+  async getProductWithCategory(id: number) {
+    const product = await this.productService.findUnique({ where: { id } });
+    if (!product) return null;
+    const category = await this.nats.call('CategoryController.getCategoryById', { id: product.categoryId });
+    return {
+      ...product,
+      category,
+    };
+  }
 }
 
 // src/module/product/product.service.ts
-import { Prisma } from '@prisma/client';
 import { injectable } from 'tsyringe-neo';
 import { prismaClient } from '../../persistence/prisma/prisma-client';
+import { Prisma } from '@prisma/client';
 @injectable()
 export class ProductService {
   constructor(private prisma: typeof prismaClient) {}
@@ -411,7 +446,7 @@ export class ControllerRegistry {
 }
 
 // src/nats/nats-abstraction.ts
-import { connect, NatsConnection, Subscription } from 'nats';
+import { connect, NatsConnection } from 'nats';
 import { getAllImplementedInterfaces, getAllInterfaceMethods } from './nats-scanner';
 interface RPCHandler<T, R> {
   (data: T): Promise<R>;

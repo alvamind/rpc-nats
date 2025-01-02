@@ -1,4 +1,4 @@
-import { connect, NatsConnection, Subscription } from 'nats';
+import { connect, NatsConnection } from 'nats';
 import { getAllImplementedInterfaces, getAllInterfaceMethods } from './nats-scanner';
 
 interface RPCHandler<T, R> {

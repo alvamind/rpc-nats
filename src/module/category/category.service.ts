@@ -1,9 +1,10 @@
-import { Prisma } from '@prisma/client';
-import { injectable } from 'tsyringe-neo';
+import { Prisma, PrismaClient } from '@prisma/client';
+import { inject, injectable } from 'tsyringe-neo';
 import { prismaClient } from '../../persistence/prisma/prisma-client';
 @injectable()
 export class CategoryService {
-  constructor(private prisma: typeof prismaClient) {}
+  constructor(@inject(PrismaClient) private prisma: typeof prismaClient) {}
+
   async findUnique(args: Prisma.CategoryFindUniqueArgs) {
     return await this.prisma.category.findUnique(args);
   }
