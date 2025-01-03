@@ -11,6 +11,7 @@ async function generateSourceCodeMarkdown(
   customInclude: string[] = [],
   customExclude: string[] = [],
 ) {
+  const projectName = path.basename(projectDir); // ambil nama project dari root dir
   const excludedPathsAndFiles = [
     'node_modules',
     '.git',
@@ -27,10 +28,10 @@ async function generateSourceCodeMarkdown(
     'documentation/tsyringe-neo.md',
     'src/common/utils',
     outputFilename,
-    ...customExclude,
   ];
 
-  const defaultExcludes = [/\.route\.ts$/, /\.test\.ts$/];
+  const defaultExcludes: RegExp[] = [];
+
   // Updated regex to handle both single-line and multi-line comments
   const singleLineCommentRegex = /^\s*\/\/.*$/gm;
   const multiLineCommentRegex = /\/\*[\s\S]*?\*\//g;
@@ -41,20 +42,38 @@ async function generateSourceCodeMarkdown(
   function isExcluded(filePath: string): boolean {
     const normalizedFilePath = path.normalize(filePath);
 
-    if (excludedPathsAndFiles.includes(normalizedFilePath)) {
-      return true;
-    }
-
     if (
+      excludedPathsAndFiles.includes(normalizedFilePath) ||
       excludedPathsAndFiles.some((excludedPath) => normalizedFilePath.startsWith(path.normalize(excludedPath) + '/'))
     ) {
       return true;
     }
 
-    const isDefaultExcluded = defaultExcludes.some((regex) => regex.test(normalizedFilePath));
-    if (isDefaultExcluded && !customInclude.some((include) => normalizedFilePath.endsWith(include))) {
+    // Convert glob patterns to regex patterns
+    const isCustomExcluded = customExclude.some((exclude) => {
+      try {
+        let pattern = exclude;
+        if (!exclude.startsWith('/') || !exclude.endsWith('/')) {
+          // Convert glob pattern to regex pattern
+          pattern = exclude
+            .replace(/\./g, '\\.') // Escape dots
+            .replace(/\*/g, '.*'); // Convert * to .*
+        } else {
+          // If it's already a regex pattern (enclosed in //)
+          pattern = exclude.slice(1, -1);
+        }
+        const regex = new RegExp(pattern);
+        return regex.test(normalizedFilePath);
+      } catch (e) {
+        console.error(`Invalid regex: ${exclude}`, e);
+        return false;
+      }
+    });
+
+    if (isCustomExcluded && !customInclude.some((include) => normalizedFilePath.endsWith(include))) {
       return true;
     }
+
     return false;
   }
 
@@ -83,7 +102,8 @@ async function generateSourceCodeMarkdown(
   const filteredPaths = allPaths.filter((p) => !isExcluded(p));
   const filteredFiles = allFiles.filter((f) => !isExcluded(f));
 
-  let output = filteredPaths.join('\n') + '\n====================\n';
+  let output = `# Project: ${projectName}\n\n`; // Tambahin judul project di awal output
+  output += filteredPaths.join('\n') + '\n====================\n';
   let totalLines = 0;
 
   for (const file of filteredFiles) {
@@ -117,7 +137,15 @@ args.forEach((arg) => {
   } else if (arg.startsWith('include=')) {
     customInclude = arg.split('=')[1].split(',');
   } else if (arg.startsWith('exclude=')) {
-    customExclude = arg.split('=')[1].split(',');
+    try {
+      const excludeValue = arg.split('=')[1];
+      if (excludeValue) {
+        customExclude = excludeValue.split(',').map((pattern) => pattern.trim());
+      }
+    } catch (error) {
+      console.error('Error parsing exclude patterns:', error);
+      customExclude = [];
+    }
   }
 });
 
